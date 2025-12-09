@@ -14,6 +14,16 @@ export const proxy = async (req: NextRequest) => {
 
     const response = NextResponse.next();
 
+    const existingToken = req.cookies.get("x-auth-token")?.value;
+    if (existingToken && meta.connected.includes(existingToken)) {
+        return response;
+    }
+
+    if (meta.connected.length >= 2) {
+        return NextResponse.redirect(new URL("/?error=room-full", req.url));
+    }
+
+
     const token = nanoid();
     response.cookies.set("x-auth-token", token, {
         path: "/",
