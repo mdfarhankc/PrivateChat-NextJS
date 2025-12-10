@@ -30,23 +30,27 @@ Each chat room is limited to two participants and automatically deletes itself a
 ## 📁 Folder Structure (Simplified)
 
 ```
-/app
-  ├── layout.tsx
-  ├── page.tsx
-  └── room/[roomId]/
-        ├── page.tsx       — server component (initial load)
-        └── RoomClient.tsx — realtime chat UI
+/src
+    /app
+    ├── layout.tsx
+    ├── page.tsx
+    └── room/[roomId]/
+            ├── page.tsx       — server component (initial load)
+            └── RoomClient.tsx — realtime chat UI
 
-/app/api
-  ├── rooms/              — room creation, TTL, destroy
-  └── messages/           — fetch + send messages
+    /app/api
+    ├── [...slugs]/         — room creation, TTL, destroy, messages list, send message (Entire Elysia api code)
+    └── realtime/           — Api for upstash realtime
 
-/lib
-  ├── redis.ts            — Upstash Redis client
-  ├── realtime.ts         — Upstash Realtime setup
-  └── eden.ts             — typed Elysia client
+    /hooks                  — All the react query hooks simplified
+    /lib
+    └── eden.ts             — typed Elysia client
+    ├── realtime-client.ts  — Upstash Realtime client
+    ├── realtime.ts         — Upstash Realtime setup
+    ├── redis.ts            — Upstash Redis client
+    └── utils.ts            — Utility functions 
 
-/middleware.ts           — token assignment & room capacity logic
+/proxy.ts           — token assignment & room capacity logic
 ```
 
 ---
@@ -69,10 +73,9 @@ npm install
 ### 3. Create `.env.local`
 
 ```env
-UPSTASH_REDIS_REST_URL=your-url
-UPSTASH_REDIS_REST_TOKEN=your-token
-UPSTASH_REDIS_URL=optional-url
-NEXT_PUBLIC_API_BASE_URL=http://localhost:3000
+NEXT_PUBLIC_API_BASE_URL="http://localhost:3000"
+UPSTASH_REDIS_REST_URL="your_url"
+UPSTASH_REDIS_REST_TOKEN="your_token"
 ```
 
 ### 4. Run locally
