@@ -17,14 +17,17 @@ export const authMiddleware = new Elysia({ name: "auth" })
         }
     })
     .derive({ as: "scoped" }, async ({ query, cookie }) => {
-        const roomId = query.roomId;
-        const token = cookie["x-auth-token"].value as string | undefined;
+        const roomId = query.roomId as string | undefined;
+        const authCookie = cookie["x-auth-token"];
+        const token = authCookie?.value as string | undefined;
 
         if (!roomId || !token) {
             throw new AuthError("Missing roomId or token!");
         }
 
-        const connected = await redis.hget<string[]>(`meta:${roomId}`, "connected");
+        const metaKey = `meta:${roomId}`;
+        const connected = await redis.hget<string[]>(metaKey, "connected");
+
         if (!connected?.includes(token)) {
             throw new AuthError("Invalid token!");
         }

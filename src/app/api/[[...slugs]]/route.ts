@@ -1,25 +1,31 @@
-import { redis } from '@/lib/redis';
 import { Elysia } from 'elysia';
 import { nanoid } from 'nanoid';
 import { z } from "zod";
+
 import { authMiddleware } from './auth';
+import { redis } from '@/lib/redis';
 import { Message, realtime } from '@/lib/realtime';
 
 const ROOM_TTL_SECONDS = 60 * 10; // Room time to live: 10 minutes
 
+const createEmptyMeta = () => ({
+    connected: [],
+    createdAt: Date.now(),
+});
+
 const rooms = new Elysia({ prefix: "/rooms" })
+    // Create room
     .post("/", async () => {
         const roomId = nanoid();
-        await redis.hset(`meta:${roomId}`, {
-            connected: [],
-            createdAt: Date.now(),
-        });
+        const metaKey = `meta:${roomId}`;
 
-        await redis.expire(`meta:${roomId}`, ROOM_TTL_SECONDS);
-        console.log("Created a room!");
+        await redis.hset(metaKey, createEmptyMeta());
+        await redis.expire(metaKey, ROOM_TTL_SECONDS);
+
         return { roomId };
     })
     .use(authMiddleware)
+    // Get Room ttl
     .get("/ttl", async ({ auth }) => {
         const { roomId } = auth;
         const ttl = await redis.ttl(`meta:${roomId}`);
@@ -29,15 +35,19 @@ const rooms = new Elysia({ prefix: "/rooms" })
             roomId: z.string()
         })
     })
+    // Destroy room
     .delete("/", async ({ auth }) => {
         const { roomId } = auth;
+        const metaKey = `meta:${roomId}`;
+        const messagesKey = `messages:${roomId}`;
+
         await realtime.channel(roomId).emit("chat.destroy", {
             isDestroyed: true
         });
+
         await Promise.all([
-            redis.del(roomId),
-            redis.del(`meta:${roomId}`),
-            redis.del(`messages:${roomId}`),
+            redis.del(metaKey),
+            redis.del(messagesKey),
         ]);
     }, {
         query: z.object({
@@ -47,9 +57,12 @@ const rooms = new Elysia({ prefix: "/rooms" })
 
 const messages = new Elysia({ prefix: "/messages" })
     .use(authMiddleware)
+    // Get messages
     .get("/", async ({ auth }) => {
         const { roomId, token } = auth;
-        const messages = await redis.lrange<Message>(`messages:${roomId}`, 0, -1);
+        const messagesKey = `messages:${roomId}`;
+
+        const messages = await redis.lrange<Message>(messagesKey, 0, -1);
 
         return {
             messages: messages.map((m) => ({
@@ -57,14 +70,22 @@ const messages = new Elysia({ prefix: "/messages" })
                 token: m.token === token ? token : undefined
             })),
         };
-    }, { query: z.object({ roomId: z.string() }) })
+    }, {
+        query: z.object({
+            roomId: z.string()
+        })
+    })
+    // Send message
     .post("/", async ({ body, auth }) => {
         const { sender, text } = body;
-        const { roomId } = auth;
-        const roomExists = await redis.exists(`meta:${roomId}`);
+        const { roomId, token } = auth;
 
+        const metaKey = `meta:${roomId}`;
+        const messagesKey = `messages:${roomId}`;
+
+        const roomExists = await redis.exists(metaKey);
         if (!roomExists) {
-            throw new Error("Room does not exists!");
+            throw new Error("Room does not exist!");
         }
 
         const message: Message = {
@@ -73,23 +94,20 @@ const messages = new Elysia({ prefix: "/messages" })
             text,
             timestamp: Date.now(),
             roomId,
+            token,
         }
 
-        await redis.rpush(`messages:${roomId}`, {
-            ...message, token: auth.token
-        });
-
+        await redis.rpush(messagesKey, message);
         await realtime.channel(roomId).emit("chat.message", message);
 
         const remaining = await redis.ttl(`meta:${roomId}`);
-
-        await Promise.all([
-            redis.expire(`messages:${roomId}`, remaining),
-            redis.expire(roomId, remaining),
-        ]);
-
-
-
+        if (remaining > 0) {
+            await Promise.all([
+                redis.expire(metaKey, remaining),
+                redis.expire(messagesKey, remaining),
+            ]);
+        }
+        return { ok: true };
     }, {
         body: z.object({
             sender: z.string().max(100),
